@@ -274,31 +274,30 @@ class CameraPreview : ViewGroup, TextureView.SurfaceTextureListener, MyPreview {
         }
     }
 
-    private fun getCurrentResolution(): MySize {
-        val configMap = mCameraCharacteristics?.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP) ?: return MySize(0, 0)
-        val resIndex = if (mUseFrontCamera) {
-            if (mIsInVideoMode) {
-                mActivity.config.frontVideoResIndex
-            } else {
-                mActivity.config.frontPhotoResIndex
-            }
-        } else {
-            if (mIsInVideoMode) {
-                mActivity.config.backVideoResIndex
-            } else {
-                mActivity.config.backPhotoResIndex
-            }
-        }
+    private fun getCurrentResolution(): MySize =
 
-        val outputSizes = if (mIsInVideoMode) {
-            getAvailableVideoSizes(configMap).toTypedArray()
-        } else {
-            configMap.getOutputSizes(ImageFormat.JPEG)
-        }
+            if (mUseFrontCamera) {
+                if (mIsInVideoMode) {
+                    mActivity.config.frontVideoResIndex
+                } else {
+                    mActivity.config.frontPhotoResIndex
+                }
+            } else {
+                if (mIsInVideoMode) {
+                    mActivity.config.backVideoResIndex
+                } else {
+                    mActivity.config.backPhotoResIndex
+                }
+            }.let { resolutionIndex ->
 
-        val size = outputSizes.sortedByDescending { it.width * it.height }[resIndex]
-        return MySize(size.width, size.height)
-    }
+                if (mIsInVideoMode) {
+                    getVideoResolutions()
+                } else {
+                    getPhotoResolutions()
+                }[resolutionIndex]
+
+            }
+
 
     private fun setupCameraOutputs(width: Int, height: Int) {
         val manager = getCameraManager()
@@ -771,6 +770,38 @@ class CameraPreview : ViewGroup, TextureView.SurfaceTextureListener, MyPreview {
 
     private fun getCameraCharacteristics(cameraId: String = mCameraId) = getCameraManager().getCameraCharacteristics(cameraId)
 
+
+    private fun getPhotoResolutions(cameraId: String = mCameraId): ArrayList<MySize> {
+        val configMap = getCameraCharacteristics(cameraId).get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+        
+        var res = arrayListOf<MySize>()
+
+        if (configMap == null){
+            return res
+        }
+
+        val lowRes = configMap.getOutputSizes(ImageFormat.JPEG).map { resolution -> MySize(resolution.width, resolution.height) } as ArrayList<MySize>
+
+        res.addAll(lowRes)
+
+        if (android.os.Build.VERSION.SDK_INT >= 23) {
+
+            val hiRes = configMap.getHighResolutionOutputSizes(ImageFormat.JPEG)
+            if(hiRes != null){
+                res.addAll(hiRes.map { resolution -> MySize(resolution.width, resolution.height) } as ArrayList<MySize>)
+            }
+
+        }
+
+        return res.sortedByDescending { resolution -> resolution.pixels() }.let { list -> ArrayList(list) }
+    }
+
+    private fun getVideoResolutions(cameraId: String = mCameraId): ArrayList<MySize> = getCameraCharacteristics(cameraId).get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)?.let { configMap ->
+
+        getAvailableVideoSizes(configMap).map { resolution -> MySize(resolution.width, resolution.height) } as ArrayList
+
+    }.orEmpty().sortedByDescending { resolution -> resolution.pixels() }.let { list -> ArrayList(list) }
+
     private fun getFlashlightMode() = when (mFlashlightState) {
         FLASH_ON -> CameraMetadata.FLASH_MODE_TORCH
         else -> CameraMetadata.FLASH_MODE_OFF
@@ -924,9 +955,8 @@ class CameraPreview : ViewGroup, TextureView.SurfaceTextureListener, MyPreview {
 
     private fun openResolutionsDialog(openVideoResolutions: Boolean) {
         val oldResolution = getCurrentResolution()
-        val configMap = mCameraCharacteristics?.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP) ?: return
-        val photoResolutions = configMap.getOutputSizes(ImageFormat.JPEG).map { MySize(it.width, it.height) } as ArrayList
-        val videoResolutions = getAvailableVideoSizes(configMap).map { MySize(it.width, it.height) } as ArrayList
+        val photoResolutions = getPhotoResolutions()
+        val videoResolutions = getVideoResolutions()
         ChangeResolutionDialog(mActivity, mUseFrontCamera, photoResolutions, videoResolutions, openVideoResolutions) {
             if (oldResolution != getCurrentResolution()) {
                 if (mIsRecording) {
